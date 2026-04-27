@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Materialdienst</title>
+
+    <link rel="icon" type="image/svg+xml" href="rsc/logo.svg" />
+
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
 
@@ -14,9 +17,18 @@
     <div class="w-full max-w-xl">
       <div class="bg-white shadow-2xl rounded-3xl p-8 border border-slate-200">
         <div class="text-center mb-8">
+          <img
+            src="rsc/logoblack.svg"
+            alt="Vereinslogo"
+            class="h-20 w-20 mx-auto mb-4 drop-shadow-sm"
+          >
+
           <h1 class="text-4xl font-extrabold text-slate-800 tracking-tight">
             Materialdienst
           </h1>
+          <p class="text-slate-500 mt-2">
+            Übersicht für die aktuelle Kalenderwoche
+          </p>
         </div>
 
         <div
@@ -63,8 +75,9 @@
     </div>
 
     <script src="./players.js"></script>
+
     <script>
-      let currentDate;
+      let currentDate = new Date();
 
       function getCalendarWeek(date) {
         const jan1 = new Date(date.getFullYear(), 0, 1);
@@ -86,9 +99,9 @@
         return calendarWeekNumber;
       }
 
-      async function setup() {
-          currentDate = new Date();
-          updateDisplay();
+      function setup() {
+        currentDate = new Date();
+        updateDisplay();
       }
 
       function nextWeek() {
@@ -102,7 +115,7 @@
       }
 
       function updateDisplay() {
-        if (players.length === 0) return;
+        if (!players || players.length === 0) return;
 
         const calendarWeek = getCalendarWeek(currentDate);
 
@@ -114,7 +127,7 @@
       }
 
       function refreshList(calendarWeek) {
-        if (players.length === 0) return;
+        if (!players || players.length === 0) return;
 
         let baseIndex = (calendarWeek * 3) % players.length;
 
