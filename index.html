@@ -1,144 +1,96 @@
 <!doctype html>
 <html lang="de">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Materialdienst-Planung">
     <title>Materialdienst</title>
-
-    <link rel="icon" type="image/svg+xml" href="rsc/logo.svg" />
-
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/svg+xml" href="/rsc/logo.svg">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
   </head>
+  <body>
+    <main class="page">
+      <section class="card" aria-labelledby="page-title">
+        <header class="header">
+          <img src="/rsc/logoblack.svg" alt="Vereinslogo" class="logo">
+          <h1 id="page-title">Materialdienst</h1>
+          <p>Übersicht für die gewählte Kalenderwoche</p>
+        </header>
 
-  <body
-    onload="setup()"
-    class="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-200 flex items-center justify-center p-6"
-  >
-    <div class="w-full max-w-xl">
-      <div class="bg-white shadow-2xl rounded-3xl p-8 border border-slate-200">
-        <div class="text-center mb-8">
-          <img
-            src="rsc/logoblack.svg"
-            alt="Vereinslogo"
-            class="h-20 w-20 mx-auto mb-4 drop-shadow-sm"
-          >
-
-          <h1 class="text-4xl font-extrabold text-slate-800 tracking-tight">
-            Materialdienst
-          </h1>
-          <p class="text-slate-500 mt-2">
-            Übersicht für die aktuelle Kalenderwoche
-          </p>
+        <div class="week-panel">
+          <h2 id="weekTitle">Materialdienst wird geladen …</h2>
+          <p id="weekDates"></p>
         </div>
 
-        <div
-          class="bg-slate-50 border border-slate-200 rounded-2xl p-5 mb-6 text-center"
-        >
-          <h2 id="KW" class="text-xl md:text-2xl font-semibold text-slate-700">
-            Materialdienst für Kalenderwoche
-          </h2>
-        </div>
+        <div id="status" class="status" role="status" hidden></div>
 
-        <div id="outputContainer" class="mb-8">
-          <ul id="personList" class="space-y-4">
-            <li
-              id="person1"
-              class="bg-blue-100 text-blue-900 font-medium text-lg rounded-xl px-5 py-4 shadow-sm border border-blue-200"
-            ></li>
-            <li
-              id="person2"
-              class="bg-blue-100 text-blue-900 font-medium text-lg rounded-xl px-5 py-4 shadow-sm border border-blue-200"
-            ></li>
-            <li
-              id="person3"
-              class="bg-blue-100 text-blue-900 font-medium text-lg rounded-xl px-5 py-4 shadow-sm border border-blue-200"
-            ></li>
-          </ul>
-        </div>
+        <ol id="personList" class="person-list" aria-live="polite">
+          <li class="person skeleton">Wird geladen …</li>
+          <li class="person skeleton">Wird geladen …</li>
+          <li class="person skeleton">Wird geladen …</li>
+        </ol>
 
-        <div class="flex flex-col sm:flex-row gap-4">
-          <button
-            onclick="previousWeek()"
-            class="flex-1 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-3 px-5 rounded-xl transition duration-200 shadow-md"
-          >
+        <div id="swapNotice" class="swap-notice" hidden></div>
+
+        <div class="week-actions">
+          <button id="previousWeek" class="button button-secondary" type="button">
             ← Vorherige Woche
           </button>
-
-          <button
-            onclick="nextWeek()"
-            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-xl transition duration-200 shadow-md"
-          >
+          <button id="currentWeek" class="button button-quiet" type="button">
+            Heute
+          </button>
+          <button id="nextWeek" class="button button-primary" type="button">
             Nächste Woche →
           </button>
         </div>
-      </div>
-    </div>
 
-    <script src="./players.js"></script>
+        <details class="admin">
+          <summary>Spieler verwalten</summary>
+          <div class="admin-content">
+            <form id="playerForm" class="add-player">
+              <label for="playerName">Neuer Spieler</label>
+              <div class="form-row">
+                <input
+                  id="playerName"
+                  name="name"
+                  type="text"
+                  maxlength="100"
+                  autocomplete="off"
+                  placeholder="Name"
+                  required
+                >
+                <button class="button button-primary" type="submit">Hinzufügen</button>
+              </div>
+            </form>
+            <ul id="playerAdminList" class="admin-list"></ul>
+          </div>
+        </details>
 
-    <script>
-      let currentDate = new Date();
+        <details class="admin">
+          <summary>Einmalig Dienst tauschen</summary>
+          <form id="swapForm" class="admin-content swap-form">
+            <p class="form-help">
+              Der Ersatzspieler übernimmt diese Woche. Der abgebende Spieler
+              übernimmt dafür automatisch dessen nächsten regulären Dienst.
+            </p>
+            <label for="originalPlayer">Wer gibt den Dienst ab?</label>
+            <select id="originalPlayer" name="original_player_id" required></select>
 
-      function getCalendarWeek(date) {
-        const jan1 = new Date(date.getFullYear(), 0, 1);
-        const dayOfWeekJan1 = jan1.getDay();
-        const daysToFirstMonday = (dayOfWeekJan1 + 6) % 7;
+            <label for="replacementPlayer">Wer übernimmt?</label>
+            <select
+              id="replacementPlayer"
+              name="replacement_player_id"
+              required
+            ></select>
 
-        const firstMonday = new Date(
-          jan1.getFullYear(),
-          0,
-          1 + daysToFirstMonday
-        );
-
-        const calendarWeekNumber =
-          Math.ceil(
-            (date.getTime() - firstMonday.getTime()) /
-              (7 * 24 * 60 * 60 * 1000)
-          ) + 1;
-
-        return calendarWeekNumber;
-      }
-
-      function setup() {
-        currentDate = new Date();
-        updateDisplay();
-      }
-
-      function nextWeek() {
-        currentDate.setDate(currentDate.getDate() + 7);
-        updateDisplay();
-      }
-
-      function previousWeek() {
-        currentDate.setDate(currentDate.getDate() - 7);
-        updateDisplay();
-      }
-
-      function updateDisplay() {
-        if (!players || players.length === 0) return;
-
-        const calendarWeek = getCalendarWeek(currentDate);
-
-        document.getElementById(
-          "KW"
-        ).innerHTML = `Materialdienst für Kalenderwoche ${calendarWeek}`;
-
-        refreshList(calendarWeek);
-      }
-
-      function refreshList(calendarWeek) {
-        if (!players || players.length === 0) return;
-
-        let baseIndex = (calendarWeek * 3) % players.length;
-
-        let player1 = players[baseIndex];
-        let player2 = players[(baseIndex + 1) % players.length];
-        let player3 = players[(baseIndex + 2) % players.length];
-
-        document.getElementById("person1").innerText = player1;
-        document.getElementById("person2").innerText = player2;
-        document.getElementById("person3").innerText = player3;
-      }
-    </script>
+            <button id="swapButton" class="button button-primary" type="submit">
+              Tausch eintragen
+            </button>
+            <p id="swapHint" class="form-help" role="status"></p>
+          </form>
+        </details>
+      </section>
+    </main>
   </body>
 </html>
