@@ -121,29 +121,218 @@ function isoWeekFromNumbers(yearValue, weekValue) {
   return result;
 }
 
-function basePlayersForPeriod(db, period) {
-  const players = db
+function assignmentsForWeek(db, weekStart) {
+  return db
     .prepare(
-      "SELECT * FROM players WHERE active = 1 ORDER BY order_index, id",
+      `SELECT p.*
+       FROM assignments a
+       JOIN players p ON p.id = a.player_id
+       WHERE a.week_start = ?
+       ORDER BY a.position`,
     )
-    .all();
-  if (players.length < 3) {
+    .all(weekStart)
+    .map(toPlayer);
+}
+
+function nextRingPlayerId(db, player) {
+  const next = db
+    .prepare(
+      `SELECT id
+       FROM players
+       WHERE order_index > ?
+          OR (order_index = ? AND id > ?)
+       ORDER BY order_index, id
+       LIMIT 1`,
+    )
+    .get(player.order_index, player.order_index, player.id);
+  if (next) return next.id;
+
+  return db
+    .prepare("SELECT id FROM players ORDER BY order_index, id LIMIT 1")
+    .get()?.id;
+}
+
+function takeNextActivePlayer(db, nextPlayerId) {
+  const cursor = nextPlayerId
+    ? db.prepare("SELECT * FROM players WHERE id = ?").get(nextPlayerId)
+    : null;
+  let player;
+
+  if (cursor) {
+    player = db
+      .prepare(
+        `SELECT *
+         FROM players
+         WHERE active = 1
+           AND (
+             order_index > ?
+             OR (order_index = ? AND id >= ?)
+           )
+         ORDER BY order_index, id
+         LIMIT 1`,
+      )
+      .get(cursor.order_index, cursor.order_index, cursor.id);
+  }
+  return (
+    player ||
+    db
+      .prepare(
+        `SELECT *
+         FROM players
+         WHERE active = 1
+         ORDER BY order_index, id
+         LIMIT 1`,
+      )
+      .get()
+  );
+}
+
+function addWeeks(weekStart, amount) {
+  const date = new Date(
+    Date.parse(`${weekStart}T00:00:00Z`) +
+      amount * MILLISECONDS_PER_WEEK,
+  );
+  return date.toISOString().slice(0, 10);
+}
+
+function ensureAssignmentsThrough(db, period) {
+  if (period.weekStart < ROTATION_START) {
+    throw new HttpError(
+      400,
+      `Die Rotation beginnt erst am ${ROTATION_START}.`,
+    );
+  }
+
+  const existing = assignmentsForWeek(db, period.weekStart);
+  if (existing.length === 3) return existing;
+  if (existing.length !== 0) {
+    throw new Error(`Unvollständige Einteilung für ${period.weekStart}.`);
+  }
+
+  const activeCount = db
+    .prepare("SELECT COUNT(*) AS count FROM players WHERE active = 1")
+    .get().count;
+  if (activeCount < 3) {
     throw new HttpError(
       422,
       "Für den Materialdienst werden mindestens drei aktive Spieler benötigt.",
     );
   }
 
-  const weeksSinceStart = Math.round(
-    (Date.parse(`${period.weekStart}T00:00:00Z`) -
-      Date.parse(`${ROTATION_START}T00:00:00Z`)) /
-      MILLISECONDS_PER_WEEK,
+  const state = db
+    .prepare("SELECT * FROM rotation_state WHERE id = 1")
+    .get();
+  if (!state) throw new Error("Rotationszustand fehlt.");
+  if (
+    state.last_generated_week &&
+    state.last_generated_week >= period.weekStart
+  ) {
+    throw new Error(`Einteilung für ${period.weekStart} fehlt unerwartet.`);
+  }
+
+  let weekStart = state.last_generated_week
+    ? addWeeks(state.last_generated_week, 1)
+    : ROTATION_START;
+  let nextPlayerId = state.next_player_id;
+  const insert = db.prepare(
+    `INSERT INTO assignments (week_start, position, player_id)
+     VALUES (?, ?, ?)`,
   );
-  const firstIndex =
-    ((weeksSinceStart * 3) % players.length + players.length) % players.length;
-  return [0, 1, 2].map((offset) =>
-    toPlayer(players[(firstIndex + offset) % players.length]),
+  const updateState = db.prepare(
+    `UPDATE rotation_state
+     SET next_player_id = ?, last_generated_week = ?
+     WHERE id = 1`,
   );
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    while (weekStart <= period.weekStart) {
+      for (let position = 1; position <= 3; position += 1) {
+        const player = takeNextActivePlayer(db, nextPlayerId);
+        if (!player) {
+          throw new HttpError(
+            422,
+            "Es ist kein aktiver Spieler für den Materialdienst verfügbar.",
+          );
+        }
+        insert.run(weekStart, position, player.id);
+        nextPlayerId = nextRingPlayerId(db, player);
+      }
+      updateState.run(nextPlayerId, weekStart);
+      weekStart = addWeeks(weekStart, 1);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return assignmentsForWeek(db, period.weekStart);
+}
+
+function previewPlayersForPeriod(db, period) {
+  const activeCount = db
+    .prepare("SELECT COUNT(*) AS count FROM players WHERE active = 1")
+    .get().count;
+  if (activeCount < 3) {
+    throw new HttpError(
+      422,
+      "Für den Materialdienst werden mindestens drei aktive Spieler benötigt.",
+    );
+  }
+
+  const state = db
+    .prepare("SELECT * FROM rotation_state WHERE id = 1")
+    .get();
+  if (!state) throw new Error("Rotationszustand fehlt.");
+
+  let weekStart = state.last_generated_week
+    ? addWeeks(state.last_generated_week, 1)
+    : ROTATION_START;
+  let nextPlayerId = state.next_player_id;
+  let selected = [];
+
+  while (weekStart <= period.weekStart) {
+    selected = [];
+    for (let position = 1; position <= 3; position += 1) {
+      const player = takeNextActivePlayer(db, nextPlayerId);
+      if (!player) {
+        throw new HttpError(
+          422,
+          "Es ist kein aktiver Spieler für den Materialdienst verfügbar.",
+        );
+      }
+      selected.push(toPlayer(player));
+      nextPlayerId = nextRingPlayerId(db, player);
+    }
+    weekStart = addWeeks(weekStart, 1);
+  }
+  return selected;
+}
+
+function basePlayersForPeriod(db, period) {
+  if (period.weekStart < ROTATION_START) {
+    throw new HttpError(
+      400,
+      `Die Rotation beginnt erst am ${ROTATION_START}.`,
+    );
+  }
+
+  const existing = assignmentsForWeek(db, period.weekStart);
+  if (existing.length === 3) return existing;
+
+  const currentPeriod = isoWeekForDate();
+  if (period.weekStart <= currentPeriod.weekStart) {
+    return ensureAssignmentsThrough(db, period);
+  }
+
+  if (currentPeriod.weekStart >= ROTATION_START) {
+    ensureAssignmentsThrough(db, currentPeriod);
+  }
+
+  const reserved = assignmentsForWeek(db, period.weekStart);
+  if (reserved.length === 3) return reserved;
+  return previewPlayersForPeriod(db, period);
 }
 
 function swapsForWeek(db, weekStart) {
@@ -299,6 +488,10 @@ function createSwap(db, body) {
       "Für den Ersatzspieler konnte kein freier Rücktausch-Termin gefunden werden.",
     );
   }
+
+  // Ein Tausch ist eine verbindliche Planung. Deshalb werden die
+  // Grundzuweisungen bis einschließlich des Rücktausches festgeschrieben.
+  ensureAssignmentsThrough(db, returnPeriod);
 
   const result = db
     .prepare(
@@ -487,6 +680,17 @@ function createRequestHandler(db) {
 
 function startServer(options = {}) {
   const db = options.db || createDatabase(options.dbPath || DEFAULT_DB);
+  const currentPeriod = isoWeekForDate();
+  const activeCount = db
+    .prepare("SELECT COUNT(*) AS count FROM players WHERE active = 1")
+    .get().count;
+  if (
+    currentPeriod.weekStart >= ROTATION_START &&
+    activeCount >= 3
+  ) {
+    ensureAssignmentsThrough(db, currentPeriod);
+  }
+
   const server = http.createServer(createRequestHandler(db));
   const port = options.port ?? Number(process.env.PORT || 3000);
   server.listen(port, options.host || "127.0.0.1");

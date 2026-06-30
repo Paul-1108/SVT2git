@@ -21,9 +21,9 @@ Tests:
 npm test
 ```
 
-## Bewusst einfaches Datenmodell
+## Datenmodell
 
-Es gibt zwei kleine fachliche Tabellen:
+Die Rotation besteht aus vier kleinen Tabellen:
 
 ```text
 players
@@ -32,6 +32,15 @@ players
   order_index
   active
   created_at
+
+rotation_state
+  next_player_id
+  last_generated_week
+
+assignments
+  week_start
+  position
+  player_id
 
 swaps
   id
@@ -42,11 +51,10 @@ swaps
   created_at
 ```
 
-Der Materialdienst wird nicht in einer zweiten Tabelle gespeichert. Das Backend
-sortiert alle aktiven Spieler nach `order_index` und wählt anhand der
-Kalenderwoche jeweils drei aufeinanderfolgende Spieler aus. Die Rotation beginnt
-fest am **29.06.2026 (KW 27)** mit den ersten drei Spielern und läuft von dort
-wochenweise weiter – auch über Jahresgrenzen hinweg.
+Die Rotation beginnt fest am **29.06.2026 (KW 27)**. `rotation_state` ist der
+persistente „Redeball“ und zeigt auf den nächsten Spieler im Ring. Pro Woche
+wird der Ball drei Positionen weitergereicht. Am Listenende läuft er wieder bei
+der ersten Position weiter.
 
 Beispiel:
 
@@ -56,17 +64,26 @@ KW 28/2026 → Position 4–6
 KW 29/2026 → Position 7–9
 ```
 
-Nach dem letzten Spieler beginnt die Liste wieder von vorne. Änderungen an
-Spielern oder ihrer Reihenfolge wirken sich deshalb direkt auf die Berechnung
-aus.
+Bereits erreichte Wochen werden in `assignments` festgeschrieben. Dadurch
+verschieben sich vergangene Einteilungen nicht, wenn sich die Spielerliste
+ändert:
+
+- Neue Spieler werden am Ende des Rings ergänzt.
+- Deaktivierte Spieler bleiben an ihrer Position, werden beim Weiterreichen
+  aber übersprungen.
+- Eine Reaktivierung nimmt wieder an der vorhandenen Ringposition teil.
+- Zukünftige Wochen sind nur eine Vorschau und bewegen den gespeicherten Ball
+  nicht.
 
 Bei einem einmaligen Tausch übernimmt Spieler B zunächst den Dienst von Spieler
 A. Das Backend sucht automatisch den nächsten regulären Dienst von B und setzt
 dort A ein. Danach läuft die unveränderte Grundrotation weiter. Der Tausch kann
-in beiden betroffenen Wochen über die Oberfläche wieder gelöscht werden.
+in beiden betroffenen Wochen über die Oberfläche wieder gelöscht werden. Weil
+ein Tausch verbindlich ist, werden die Grundzuweisungen bis zum Rücktausch
+reserviert.
 
-Eine Datenbank aus der vorherigen Serverversion wird beim Start automatisch auf
-dieses einfache Modell reduziert. Vorhandene Spieler bleiben erhalten.
+Eine Datenbank aus einer vorherigen Serverversion wird beim Start automatisch
+erweitert. Vorhandene Spieler bleiben erhalten.
 
 ## API
 

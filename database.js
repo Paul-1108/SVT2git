@@ -60,6 +60,17 @@ function createDatabase(filename) {
   if (count === 0) {
     db.exec(`BEGIN IMMEDIATE; ${seed} COMMIT;`);
   }
+  db.exec(`
+    INSERT OR IGNORE INTO rotation_state (
+      id,
+      next_player_id,
+      last_generated_week
+    )
+    SELECT 1, id, NULL
+    FROM players
+    ORDER BY order_index, id
+    LIMIT 1
+  `);
   return db;
 }
 

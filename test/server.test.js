@@ -9,6 +9,7 @@ const { once } = require("node:events");
 const { DatabaseSync } = require("node:sqlite");
 const { createDatabase } = require("../database");
 const {
+  calculateMaterialDuty,
   isoWeekForDate,
   isoWeekFromNumbers,
   startServer,
@@ -56,7 +57,7 @@ test("berechnet ISO-Wochen korrekt", () => {
   });
 });
 
-test("liefert die Spielerliste aus der einzigen Datentabelle", async () => {
+test("liefert die Spielerliste aus SQLite", async () => {
   const { response, body } = await request("/api/players");
   assert.equal(response.status, 200);
   assert.equal(body.players.length, 32);
@@ -105,6 +106,53 @@ test("rückt ab dem Startdatum jede Woche drei Spieler weiter", async () => {
   );
   assert.equal(nextYear.response.status, 200);
   assert.equal(nextYear.body.players.length, 3);
+});
+
+test("behält den Redeball bei Änderungen stabil in seinem Ring", () => {
+  const ringDb = createDatabase(":memory:");
+  try {
+    calculateMaterialDuty(ringDb, isoWeekFromNumbers(2026, 27));
+    calculateMaterialDuty(ringDb, isoWeekFromNumbers(2026, 28));
+
+    ringDb.prepare("UPDATE players SET active = 0 WHERE name = 'Elia'").run();
+    ringDb
+      .prepare("INSERT INTO players (name, order_index) VALUES (?, ?)")
+      .run("Neuer Spieler", 33);
+
+    const endOfRound = calculateMaterialDuty(
+      ringDb,
+      isoWeekFromNumbers(2026, 37),
+    );
+    assert.deepEqual(
+      endOfRound.basePlayers.map((player) => player.name),
+      ["Tizi", "Tobi", "Neuer Spieler"],
+    );
+
+    const nextRound = calculateMaterialDuty(
+      ringDb,
+      isoWeekFromNumbers(2026, 38),
+    );
+    assert.deepEqual(
+      nextRound.basePlayers.map((player) => player.name),
+      ["Andre", "Brian", "Felix"],
+    );
+
+    const unchangedPast = calculateMaterialDuty(
+      ringDb,
+      isoWeekFromNumbers(2026, 27),
+    );
+    assert.deepEqual(
+      unchangedPast.basePlayers.map((player) => player.name),
+      ["Andre", "Brian", "Elia"],
+    );
+
+    const state = ringDb
+      .prepare("SELECT last_generated_week FROM rotation_state WHERE id = 1")
+      .get();
+    assert.equal(state.last_generated_week, "2026-06-29");
+  } finally {
+    ringDb.close();
+  }
 });
 
 test("tauscht einmal hin und beim nächsten Dienst zurück", async () => {
@@ -241,7 +289,12 @@ test("migriert Spieler aus der vorherigen Version", () => {
 
     assert.equal(player.name, "Migrierter Spieler");
     assert.equal(player.order_index, 4);
-    assert.deepEqual(tables, ["players", "swaps"]);
+    assert.deepEqual(tables, [
+      "assignments",
+      "players",
+      "rotation_state",
+      "swaps",
+    ]);
   } finally {
     localDb?.close();
     for (const entry of fs.readdirSync(tempDirectory)) {
